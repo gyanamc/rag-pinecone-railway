@@ -1,10 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 import logging
 from app.rag_service import rag_service
 from app.config import settings
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +28,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files directory
+static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 # Request/Response models
@@ -56,15 +64,20 @@ async def startup_event():
         logger.info("RAG service initialized successfully")
     except Exception as e:
         logger.error(f"Error during startup: {str(e)}")
-        raise
+        # Don't raise - allow server to start even if keys are missing
+        logger.warning("Server starting without RAG initialization. Please check API keys.")
 
 
 @app.get("/")
 async def root():
-    """Health check endpoint."""
+    """Serve the web UI."""
+    static_path = os.path.join(static_dir, "index.html")
+    if os.path.exists(static_path):
+        return FileResponse(static_path)
     return {
         "message": "RAG Pinecone API is running",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "docs": "/docs"
     }
 
 
