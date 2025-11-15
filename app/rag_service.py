@@ -82,8 +82,10 @@ class RAGService:
             if self.vector_store is None:
                 self.vector_store = pinecone_manager.get_vector_store()
             
-            # Get index stats
-            index = pinecone_manager.pc.Index(settings.pinecone_index_name)
+            # Get index stats using the Pinecone client from manager
+            from app.config import settings
+            pc = pinecone_manager.pc
+            index = pc.Index(settings.pinecone_index_name)
             stats = index.describe_index_stats()
             total_vectors = stats.get('total_vector_count', 0)
             return total_vectors
