@@ -1,6 +1,5 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from app.pinecone_client import pinecone_manager
 from app.document_processor import DocumentProcessor
@@ -21,7 +20,6 @@ class RAGService:
             temperature=0,
             openai_api_key=settings.openai_api_key
         )
-        self.retrieval_chain = None
         self.retriever = None
     
     def initialize(self):
@@ -31,27 +29,6 @@ class RAGService:
             
             # Create retriever
             self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 3})
-            
-            # Create prompt template
-            prompt = ChatPromptTemplate.from_template("""Use the following pieces of context to answer the question at the end. 
-            If you don't know the answer, just say that you don't know, don't try to make up an answer.
-            
-            Context: {context}
-            
-            Question: {question}
-            
-            Answer:""")
-            
-            # Create RAG chain using LCEL
-            def format_docs(docs):
-                return "\n\n".join(doc.page_content for doc in docs)
-            
-            self.retrieval_chain = (
-                {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
-                | prompt
-                | self.llm
-                | StrOutputParser()
-            )
             
             logger.info("RAG service initialized successfully")
             return True
@@ -104,7 +81,7 @@ class RAGService:
             Dictionary with answer and source documents
         """
         try:
-            if self.retrieval_chain is None or self.retriever is None:
+            if self.retriever is None:
                 self.initialize()
             
             # Get retrieved documents for source tracking
