@@ -87,6 +87,21 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/debug/stats")
+async def get_stats():
+    """Debug endpoint to check document count."""
+    try:
+        doc_count = rag_service.get_document_count()
+        return {
+            "document_count": doc_count,
+            "vector_store_initialized": rag_service.vector_store is not None,
+            "retriever_initialized": rag_service.retriever is not None
+        }
+    except Exception as e:
+        logger.error(f"Error getting stats: {str(e)}")
+        return {"error": str(e)}
+
+
 @app.post("/documents", response_model=DocumentResponse)
 async def add_document(request: DocumentRequest):
     """

@@ -57,18 +57,39 @@ class RAGService:
                 return {"status": "error", "chunks_added": 0, "message": "No valid text to process"}
             
             # Add to vector store
-            self.vector_store.add_documents(documents)
+            logger.info(f"Adding {len(documents)} document chunks to Pinecone...")
+            doc_ids = self.vector_store.add_documents(documents)
+            
+            # Small delay to ensure Pinecone has indexed the documents
+            import time
+            time.sleep(2)
             
             # Re-initialize retriever after adding documents to ensure it's up to date
             if self.vector_store:
                 self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 3})
+                logger.info("Retriever re-initialized after adding documents")
             
-            logger.info(f"Added {len(documents)} document chunks to vector store")
+            logger.info(f"Successfully added {len(documents)} document chunks to vector store")
             return {"status": "success", "chunks_added": len(documents)}
             
         except Exception as e:
             logger.error(f"Error adding documents: {str(e)}")
             raise
+    
+    def get_document_count(self):
+        """Get the approximate number of documents in the vector store."""
+        try:
+            if self.vector_store is None:
+                self.vector_store = pinecone_manager.get_vector_store()
+            
+            # Get index stats
+            index = pinecone_manager.pc.Index(settings.pinecone_index_name)
+            stats = index.describe_index_stats()
+            total_vectors = stats.get('total_vector_count', 0)
+            return total_vectors
+        except Exception as e:
+            logger.error(f"Error getting document count: {str(e)}")
+            return 0
     
     def query(self, question: str):
         """
@@ -84,14 +105,27 @@ class RAGService:
             if self.retriever is None:
                 self.initialize()
             
+            # Check if we have any documents in the index first
+            doc_count = self.get_document_count()
+            logger.info(f"Total vectors in index: {doc_count}")
+            
+            if doc_count == 0:
+                logger.warning("No documents found in Pinecone index")
+                return {
+                    "answer": "I don't have any documents in my knowledge base yet. Please upload some documents first using the 'Upload Documents' tab.",
+                    "source_documents": []
+                }
+            
             # Get retrieved documents for source tracking
+            logger.info(f"Searching for documents with query: {question}")
             retrieved_docs = self.retriever.invoke(question)
+            logger.info(f"Retrieved {len(retrieved_docs)} documents")
             
             # Check if we have any documents
             if not retrieved_docs or len(retrieved_docs) == 0:
-                logger.warning(f"No documents found for query: {question}")
+                logger.warning(f"No documents retrieved for query: {question}. Total vectors in index: {doc_count}")
                 return {
-                    "answer": "I don't have any documents in my knowledge base yet. Please upload some documents first using the 'Upload Documents' tab.",
+                    "answer": f"I couldn't find relevant information for your question. I have {doc_count} document(s) in my knowledge base. Try rephrasing your question or uploading more relevant documents.",
                     "source_documents": []
                 }
             
