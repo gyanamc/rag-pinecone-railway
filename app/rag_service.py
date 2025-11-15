@@ -1,6 +1,7 @@
 from langchain_openai import ChatOpenAI
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 from app.pinecone_client import pinecone_manager
 from app.document_processor import DocumentProcessor
 from app.config import settings
@@ -16,39 +17,40 @@ class RAGService:
         self.vector_store = None
         self.document_processor = DocumentProcessor()
         self.llm = ChatOpenAI(
-            model_name="gpt-3.5-turbo",
+            model="gpt-3.5-turbo",
             temperature=0,
             openai_api_key=settings.openai_api_key
         )
-        self.qa_chain = None
+        self.retrieval_chain = None
+        self.retriever = None
     
     def initialize(self):
         """Initialize the RAG service with vector store."""
         try:
             self.vector_store = pinecone_manager.get_vector_store()
             
-            # Create custom prompt template
-            prompt_template = """Use the following pieces of context to answer the question at the end. 
+            # Create retriever
+            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 3})
+            
+            # Create prompt template
+            prompt = ChatPromptTemplate.from_template("""Use the following pieces of context to answer the question at the end. 
             If you don't know the answer, just say that you don't know, don't try to make up an answer.
             
             Context: {context}
             
             Question: {question}
             
-            Answer:"""
+            Answer:""")
             
-            PROMPT = PromptTemplate(
-                template=prompt_template,
-                input_variables=["context", "question"]
-            )
+            # Create RAG chain using LCEL
+            def format_docs(docs):
+                return "\n\n".join(doc.page_content for doc in docs)
             
-            # Create QA chain
-            self.qa_chain = RetrievalQA.from_chain_type(
-                llm=self.llm,
-                chain_type="stuff",
-                retriever=self.vector_store.as_retriever(search_kwargs={"k": 3}),
-                chain_type_kwargs={"prompt": PROMPT},
-                return_source_documents=True
+            self.retrieval_chain = (
+                {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
+                | prompt
+                | self.llm
+                | StrOutputParser()
             )
             
             logger.info("RAG service initialized successfully")
@@ -94,20 +96,23 @@ class RAGService:
             Dictionary with answer and source documents
         """
         try:
-            if self.qa_chain is None:
+            if self.retrieval_chain is None:
                 self.initialize()
             
+            # Get retrieved documents for source tracking
+            retrieved_docs = self.retriever.invoke(question)
+            
             # Get response
-            result = self.qa_chain.invoke({"query": question})
+            answer = self.retrieval_chain.invoke(question)
             
             return {
-                "answer": result["result"],
+                "answer": answer,
                 "source_documents": [
                     {
                         "content": doc.page_content[:200] + "...",
                         "metadata": doc.metadata
                     }
-                    for doc in result.get("source_documents", [])
+                    for doc in retrieved_docs
                 ]
             }
             
